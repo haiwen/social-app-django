@@ -7,6 +7,7 @@ from django.db.utils import IntegrityError
 
 from social_core.storage import UserMixin, AssociationMixin, NonceMixin, \
                                 CodeMixin, PartialMixin, BaseStorage
+from seahub.base.accounts import User
 
 
 class DjangoUserMixin(UserMixin):
@@ -25,7 +26,7 @@ class DjangoUserMixin(UserMixin):
             qs = cls.objects.exclude(id=association_id)
         else:
             qs = cls.objects.exclude(provider=backend_name)
-        qs = qs.filter(user=user)
+        qs = qs.filter(username=user.username)
 
         if hasattr(user, 'has_usable_password'):
             valid_password = user.has_usable_password()
@@ -39,7 +40,8 @@ class DjangoUserMixin(UserMixin):
 
     @classmethod
     def username_field(cls):
-        return getattr(cls.user_model(), 'USERNAME_FIELD', 'username')
+        return 'username'
+        # return getattr(cls.user_model(), 'USERNAME_FIELD', 'username')
 
     @classmethod
     def user_exists(cls, *args, **kwargs):
@@ -49,7 +51,15 @@ class DjangoUserMixin(UserMixin):
         """
         if 'username' in kwargs:
             kwargs[cls.username_field()] = kwargs.pop('username')
-        return cls.user_model().objects.filter(*args, **kwargs).count() > 0
+
+        assert 'username' in kwargs
+
+        try:
+            User.objects.get(email=kwargs['username'])
+            return True
+        except User.DoesNotExist:
+            return False
+        # return cls.user_model().objects.filter(*args, **kwargs).count() > 0
 
     @classmethod
     def get_username(cls, user):
@@ -60,37 +70,48 @@ class DjangoUserMixin(UserMixin):
         username_field = cls.username_field()
         if 'username' in kwargs and username_field not in kwargs:
             kwargs[username_field] = kwargs.pop('username')
-        try:
-            if hasattr(transaction, 'atomic'):
-                # In Django versions that have an "atomic" transaction decorator / context
-                # manager, there's a transaction wrapped around this call.
-                # If the create fails below due to an IntegrityError, ensure that the transaction
-                # stays undamaged by wrapping the create in an atomic.
-                with transaction.atomic():
-                    user = cls.user_model().objects.create_user(*args, **kwargs)
-            else:
-                user = cls.user_model().objects.create_user(*args, **kwargs)
-        except IntegrityError:
-            # User might have been created on a different thread, try and find them.
-            # If we don't, re-raise the IntegrityError.
-            exc_info = sys.exc_info()
-            # If email comes in as None it won't get found in the get
-            if kwargs.get('email', True) is None:
-                kwargs['email'] = ''
-            try:
-                user = cls.user_model().objects.get(*args, **kwargs)
-            except cls.user_model().DoesNotExist:
-                six.reraise(*exc_info)
+
+        assert 'username' in kwargs
+
+        user = User.objects.create_user(email=kwargs['username'],
+                                        is_active=True)
+
+        # try:
+        #     if hasattr(transaction, 'atomic'):
+        #         # In Django versions that have an "atomic" transaction decorator / context
+        #         # manager, there's a transaction wrapped around this call.
+        #         # If the create fails below due to an IntegrityError, ensure that the transaction
+        #         # stays undamaged by wrapping the create in an atomic.
+        #         with transaction.atomic():
+        #             user = cls.user_model().objects.create_user(*args, **kwargs)
+        #     else:
+        #         user = cls.user_model().objects.create_user(*args, **kwargs)
+        # except IntegrityError:
+        #     # User might have been created on a different thread, try and find them.
+        #     # If we don't, re-raise the IntegrityError.
+        #     exc_info = sys.exc_info()
+        #     # If email comes in as None it won't get found in the get
+        #     if kwargs.get('email', True) is None:
+        #         kwargs['email'] = ''
+        #     try:
+        #         user = cls.user_model().objects.get(*args, **kwargs)
+        #     except cls.user_model().DoesNotExist:
+        #         six.reraise(*exc_info)
         return user
 
     @classmethod
     def get_user(cls, pk=None, **kwargs):
         if pk:
             kwargs = {'pk': pk}
+
         try:
-            return cls.user_model().objects.get(**kwargs)
-        except cls.user_model().DoesNotExist:
+            return User.objects.get(email=pk)
+        except User.DoesNotExist:
             return None
+        # try:
+        #     return cls.user_model().objects.get(**kwargs)
+        # except cls.user_model().DoesNotExist:
+        #     return None
 
     @classmethod
     def get_users_by_email(cls, email):
@@ -109,7 +130,7 @@ class DjangoUserMixin(UserMixin):
 
     @classmethod
     def get_social_auth_for_user(cls, user, provider=None, id=None):
-        qs = cls.objects.filter(user=user)
+        qs = cls.objects.filter(username=user.username)
 
         if provider:
             qs = qs.filter(provider=provider)
@@ -128,9 +149,9 @@ class DjangoUserMixin(UserMixin):
             # If the create fails below due to an IntegrityError, ensure that the transaction
             # stays undamaged by wrapping the create in an atomic.
             with transaction.atomic():
-                social_auth = cls.objects.create(user=user, uid=uid, provider=provider)
+                social_auth = cls.objects.create(username=user.username, uid=uid, provider=provider)
         else:
-            social_auth = cls.objects.create(user=user, uid=uid, provider=provider)
+            social_auth = cls.objects.create(username=user.username, uid=uid, provider=provider)
         return social_auth
 
 

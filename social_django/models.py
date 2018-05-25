@@ -6,6 +6,8 @@ from django.conf import settings
 from django.db.utils import IntegrityError
 
 from social_core.utils import setting_name
+from seahub.base.accounts import User
+from seahub.base.fields import LowerCaseCharField
 
 from .compat import get_rel_model
 from .storage import DjangoUserMixin, DjangoAssociationMixin, \
@@ -13,7 +15,6 @@ from .storage import DjangoUserMixin, DjangoAssociationMixin, \
                      DjangoPartialMixin, BaseDjangoStorage
 from .fields import JSONField
 from .managers import UserSocialAuthManager
-
 
 USER_MODEL = getattr(settings, setting_name('USER_MODEL'), None) or \
              getattr(settings, 'AUTH_USER_MODEL', None) or \
@@ -30,15 +31,16 @@ ASSOCIATION_HANDLE_LENGTH = getattr(
 
 class AbstractUserSocialAuth(models.Model, DjangoUserMixin):
     """Abstract Social Auth association model"""
-    user = models.ForeignKey(USER_MODEL, related_name='social_auth',
-                             on_delete=models.CASCADE)
+    # user = models.ForeignKey(USER_MODEL, related_name='social_auth',
+    #                          on_delete=models.CASCADE)
+    username = LowerCaseCharField(max_length=255, db_index=True)
     provider = models.CharField(max_length=32)
     uid = models.CharField(max_length=UID_LENGTH)
     extra_data = JSONField()
     objects = UserSocialAuthManager()
 
     def __str__(self):
-        return str(self.user)
+        return str(self.username)
 
     class Meta:
         app_label = "social_django"
@@ -47,21 +49,30 @@ class AbstractUserSocialAuth(models.Model, DjangoUserMixin):
     @classmethod
     def get_social_auth(cls, provider, uid):
         try:
-            return cls.objects.select_related('user').get(provider=provider,
-                                                          uid=uid)
+            social_auth = cls.objects.get(provider=provider, uid=uid)
         except cls.DoesNotExist:
             return None
 
+        try:
+            u = User.objects.get(email=social_auth.username)
+            social_auth.user = u
+        except User.DoesNotExist:
+            social_auth.user = None
+
+        return social_auth
+
     @classmethod
     def username_max_length(cls):
-        username_field = cls.username_field()
-        field = cls.user_model()._meta.get_field(username_field)
-        return field.max_length
+        return 255
+        # username_field = cls.username_field()
+        # field = cls.user_model()._meta.get_field(username_field)
+        # return field.max_length
 
     @classmethod
     def user_model(cls):
-        user_model = get_rel_model(field=cls._meta.get_field('user'))
-        return user_model
+        return User
+        # user_model = get_rel_model(field=cls._meta.get_field('user'))
+        # return user_model
 
 
 class UserSocialAuth(AbstractUserSocialAuth):
