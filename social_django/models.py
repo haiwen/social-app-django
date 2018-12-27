@@ -57,7 +57,9 @@ class AbstractUserSocialAuth(models.Model, DjangoUserMixin):
             u = User.objects.get(email=social_auth.username)
             social_auth.user = u
         except User.DoesNotExist:
-            social_auth.user = None
+            # Delete social_auth record if a user is deleted.
+            social_auth.delete()
+            return None
 
         return social_auth
 
@@ -148,3 +150,12 @@ class DjangoStorage(BaseDjangoStorage):
     @classmethod
     def is_integrity_error(cls, exception):
         return exception.__class__ is IntegrityError
+
+########## handle signals
+from django.dispatch import receiver
+from registration.signals import user_deleted
+
+@receiver(user_deleted)
+def user_deleted_cb(sender, **kwargs):
+    username = kwargs['username']
+    UserSocialAuth.objects.filter(username=username).delete()
